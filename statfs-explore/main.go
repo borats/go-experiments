@@ -13,7 +13,7 @@ import (
 
 var (
 	path  = flag.String("path", "/", "path to calculate the usage details on")
-	debug = flag.Bool("debug", false, "print statfs values")
+	debug = flag.Bool("debug", false, "spew statfs structure")
 )
 
 func init() {
@@ -27,7 +27,6 @@ func main() {
 	}
 
 	if *debug == true {
-		spew.Dump(diskSize)
 		spew.Dump(diskSize)
 	}
 	fmt.Printf("total space %s = %.2f %s\n", *path, diskSize.total, unitStr)
