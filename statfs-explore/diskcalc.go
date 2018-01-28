@@ -8,8 +8,6 @@ import (
 )
 
 var (
-	unit           float64
-	unitStr        string
 	totalSizeBytes float64
 	statfs         syscall.Statfs_t
 )
@@ -25,6 +23,8 @@ type diskSize struct {
 	total     float64
 	available float64
 	statfs    syscall.Statfs_t
+	unit      float64
+	unitStr   string
 }
 
 func diskCalc() (*diskSize, error) {
@@ -32,6 +32,9 @@ func diskCalc() (*diskSize, error) {
 		return nil, err
 	}
 	totalSizeBytes = float64(statfs.Blocks) * float64(statfs.Bsize)
+	var unit float64
+	var unitStr string
+
 	if totalSizeBytes >= KByte && totalSizeBytes <= MByte {
 		unit = KByte
 		unitStr = "KB"
@@ -49,5 +52,7 @@ func diskCalc() (*diskSize, error) {
 		total:     totalSizeBytes / unit,
 		available: (float64(statfs.Bavail) * float64(statfs.Bsize)) / unit,
 		statfs:    statfs,
+		unit:      unit,
+		unitStr:   unitStr,
 	}, nil
 }

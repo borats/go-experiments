@@ -29,6 +29,6 @@ func main() {
 	if *debug == true {
 		spew.Dump(diskSize)
 	}
-	fmt.Printf("total space %s = %.2f %s\n", *path, diskSize.total, unitStr)
-	fmt.Printf("available space %s = %.2f %s\n", *path, diskSize.available, unitStr)
+	fmt.Printf("total space %s = %.2f %s\n", *path, diskSize.total, diskSize.unitStr)
+	fmt.Printf("available space %s = %.2f %s\n", *path, diskSize.available, diskSize.unitStr)
 }
