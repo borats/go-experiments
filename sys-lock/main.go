@@ -15,11 +15,11 @@ func main() {
 	}
 	defer unlock()
 
-	reunlock, err := singlefile.Lock(key)
+	reUnlock, err := singlefile.Lock(key)
 	if err != nil {
 		log.Fatalf("relock failed: %v\n", err)
 	}
-	defer reunlock()
+	defer reUnlock()
 
 	time.Sleep(20 * time.Second)
 }
