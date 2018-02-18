@@ -1,9 +1,9 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"sync"
+
 	"github.com/davecgh/go-spew/spew"
 )
 
@@ -16,13 +16,13 @@ func doPanic(wg *sync.WaitGroup) {
 		spew.Dump(wg)
 		wg.Done()
 	}()
-	fmt.Println("hello i will panic")
+	log.Println("hello i will panic")
 	panic("hello i panic'ed")
 }
 
 func dontPanic(wg *sync.WaitGroup) {
 	defer wg.Done()
-	fmt.Println("hello i do not panic")
+	log.Println("hello i do not panic")
 }
 
 func main() {
