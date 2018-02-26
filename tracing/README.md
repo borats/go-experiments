@@ -1,4 +1,3 @@
 ## tracing
 
-Explore simple execution time
-tracing
+Explore simple execution time tracing

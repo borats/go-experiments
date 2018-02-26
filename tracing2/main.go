@@ -13,7 +13,7 @@ func trace(start time.Time) {
 
 // progressPrint prints dots every second
 func progressPrint() {
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
 	for range ticker.C {
 		fmt.Printf(".")
 	}
