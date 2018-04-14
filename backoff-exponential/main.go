@@ -17,7 +17,7 @@ func main() {
 	b := backoff.NewExponentialBackOff()
 	b.MaxElapsedTime = 0 // indefinitely
 	for {
-		s, err := net.Dial("tcp", "dns1.local:2222")
+		s, err := net.Dial("tcp", "127.0.0.1:2222")
 		if err != nil {
 			t := b.NextBackOff()
 			fmt.Printf("err %s occurred. connecting again in %+v and closing socket\n", err, t)
