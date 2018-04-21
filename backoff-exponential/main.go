@@ -15,15 +15,14 @@ var (
 
 func main() {
 	b := backoff.NewExponentialBackOff()
-	b.MaxElapsedTime = 0 // indefinitely
 	for {
-		s, err := net.Dial("tcp", "127.0.0.1:2222") // nc -v -k -l 2222
+		s, err := net.Dial("tcp", "127.0.0.1:2222") // nc -vvkl 2222
 		if err != nil {
 			t := b.NextBackOff()
-			fmt.Printf("err %s occurred. connecting again in %+v and closing socket\n", err, t)
-			if s != nil {
-				s.Close()
+			if t == backoff.Stop {
+				b.Reset()
 			}
+			fmt.Printf("error occurred: %+v. connecting again in %+v and closing socket\n", err, t)
 			time.Sleep(t)
 		} else {
 			n, err := s.Write([]byte(msg))
@@ -31,7 +30,9 @@ func main() {
 				return
 			}
 			fmt.Printf("connected and wrote %d bytes\n", n)
-			s.Close() // we are done
+		}
+		if s != nil {
+			s.Close()
 		}
 	}
 }
