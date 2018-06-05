@@ -36,7 +36,7 @@ typedef struct {
 	uid_t uid;
 	gid_t gid;
 	int ret;
-	char filename[256];
+	char filename[20];
 } chown_event_t;
 
 BPF_PERF_OUTPUT(chown_events);
@@ -77,7 +77,7 @@ type chownEvent struct {
 	Uid         uint32
 	Gid         uint32
 	ReturnValue int32
-	Filename    [256]byte
+	Filename    [20]byte
 }
 
 func main() {

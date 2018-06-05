@@ -4,10 +4,10 @@ package main
 
 import (
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
-	"github.com/spaolacci/murmur3"
 	"hash"
 	"hash/fnv"
+
+	"github.com/spaolacci/murmur3"
 )
 
 type IBloomFilter interface {
@@ -24,7 +24,7 @@ type BloomFilter struct {
 	hashFuncs []hash.Hash64 // The hash functions
 }
 
-// Returns a new BloomFilter object,
+// New returns a ptr to a BloomFilter
 func New(size uint) *BloomFilter {
 	return &BloomFilter{
 		bitset: make([]bool, size),
@@ -39,17 +39,17 @@ func New(size uint) *BloomFilter {
 	}
 }
 
-// Adds the item into the bloom filter set by hashing in over the . // hash functions
+// Add the item into the bloom filter set by hashing in over the . // hash functions
 func (bf *BloomFilter) Add(item []byte) {
 	hashes := bf.hashValues(item)
 	for i := uint(0); i < uint(bf.k); i++ {
 		position := uint(hashes[i]) % bf.m
 		bf.bitset[uint(position)] = true
 	}
-	bf.n += 1
+	bf.n++
 }
 
-// Calculates all the hash values by applying in the item over the // hash functions
+// hashValues calculates all the hash values by applying in the item over the // hash functions
 func (bf *BloomFilter) hashValues(item []byte) []uint64 {
 	var result []uint64
 	for _, hashFunc := range bf.hashFuncs {
@@ -60,8 +60,8 @@ func (bf *BloomFilter) hashValues(item []byte) []uint64 {
 	return result
 }
 
-// Test if the item into the bloom filter is set by hashing in over // the hash functions
-func (bf *BloomFilter) Test(item []byte) (exists bool) {
+// TestIsPresent tests if the item in the bloom filter is set by hashing in over // the hash functions
+func (bf *BloomFilter) TestIsPresent(item []byte) (exists bool) {
 	hashes := bf.hashValues(item)
 	exists = true
 	for i := uint(0); i < uint(bf.k); i++ {
@@ -79,8 +79,7 @@ func main() {
 	for i := 0; i < 20; i++ {
 		bf.Add([]byte("hello"))
 	}
-	spew.Dump(bf)
-	fmt.Println(bf.Test([]byte("hello")))
-	fmt.Println(bf.Test([]byte("world")))
-	fmt.Println(bf.Test([]byte("hi")))
+	fmt.Println(bf.TestIsPresent([]byte("hello")))
+	fmt.Println(bf.TestIsPresent([]byte("world")))
+	fmt.Println(bf.TestIsPresent([]byte("hi")))
 }
