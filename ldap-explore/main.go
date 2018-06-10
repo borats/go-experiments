@@ -9,25 +9,26 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nbutton23/zxcvbn-go"
 	"github.com/pkg/errors"
 	"gopkg.in/ldap.v2"
 )
 
 var (
-	errInvalidCredential = errors.New("Invalid Credentials Provided")
+	errPasswordReuse     = errors.New("Old password reused")
+	errWeakPasswordUsed  = errors.New("Weak password provided")
 	errInvalidUser       = errors.New("Invalid User")
 	errPasswordDontMatch = errors.New("New passwords do not match")
 )
 
 const (
 	// TODO use encrypted configuration file
-	ldapURI      = "ldap.example.org:389" // starttls over :389
-	bindDN       = "cn=binduser,dc=example,dc=org"
-	bindPW       = "bindpw-p@ssw0rd"
-	baseDN       = "dc=example,dc=org"
-	searchDN     = "(&(objectClass=organizationalPerson)(uid=%s))"
-	minPasswdLen = 8
-	//minPasswdComplexity = 10
+	listenAddress = "0.0.0.0:8081"
+	ldapURI       = "ldap.example.org:389" // starttls over :389
+	bindDN        = "cn=binduser,dc=example,dc=org"
+	bindPW        = "bindpw-p@ssw0rd"
+	baseDN        = "dc=example,dc=org"
+	searchDN      = "(&(objectClass=organizationalPerson)(uid=%s))"
 )
 
 type ldapPasswdUser struct {
@@ -56,12 +57,25 @@ func changePasswordHandleFunc(w http.ResponseWriter, req *http.Request) {
 		currentPasswd := req.Form.Get("currentpass")
 		newPasswd1 := req.Form.Get("newpass1")
 		newPasswd := req.Form.Get("newpass2")
-		// TODO use something like cracklib to check for password strength
-		if len(newPasswd1+newPasswd) <= minPasswdLen*2 || newPasswd1 != newPasswd {
+		if currentPasswd == newPasswd1 || currentPasswd == newPasswd {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(errPasswordReuse.Error()))
+			return
+		}
+		if newPasswd1 != newPasswd {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(errPasswordDontMatch.Error()))
 			return
 		}
+		// check password strength
+		passStrength := zxcvbn.PasswordStrength(newPasswd, nil)
+		log.Printf("password provided from: %s for user: %s with a score of: %d\n", req.RemoteAddr, username, passStrength.Score)
+		if passStrength.Score < 3 {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(errWeakPasswordUsed.Error()))
+			return
+		}
+
 		log.Printf("initial change password http request received from: %s for user: %s\n", req.RemoteAddr, username)
 		ldu := newLdapPasswdUser(username, currentPasswd, newPasswd)
 		ok, err := ldu.isValidLDAPUser()
@@ -88,9 +102,8 @@ func changePasswordHandleFunc(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if strings.ToLower(req.Method) == "get" {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`
 		<html>
 			<head>
 				<title>
@@ -152,7 +165,7 @@ func changePasswordHandleFunc(w http.ResponseWriter, req *http.Request) {
 			</body>
 		</html>	
 		`))
-	}
+
 }
 
 func (ldu *ldapPasswdUser) bootstrapLdapClient() (*ldap.Conn, error) {
@@ -239,11 +252,12 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", changePasswordHandleFunc)
 	srv := &http.Server{
-		Addr:           ":8081",
+		Addr:           listenAddress,
 		Handler:        mux,
 		ReadTimeout:    5 * time.Second,
 		WriteTimeout:   5 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
+	log.Printf("running http server at %s\n", listenAddress)
 	log.Fatal(srv.ListenAndServe())
 }
