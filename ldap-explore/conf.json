@@ -1,0 +1,8 @@
+{
+  "listen_address": "0.0.0.0:8081",
+  "ldap_uri": "localhost:389",
+  "bind_dn": "cn=wow,dc=blizzard,dc=local",
+  "bind_pw": "p@ssw0rd",
+  "base_dn": "dc=blizzard,dc=local",
+  "search_dn": "(&(objectClass=organizationalPerson)(uid=%s))"
+}

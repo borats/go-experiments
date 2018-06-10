@@ -9,9 +9,13 @@ import (
 	"sync"
 	"time"
 
+	"encoding/json"
 	"github.com/nbutton23/zxcvbn-go"
 	"github.com/pkg/errors"
 	"gopkg.in/ldap.v2"
+	"io"
+	"io/ioutil"
+	"os"
 )
 
 var (
@@ -19,91 +23,13 @@ var (
 	errWeakPasswordUsed  = errors.New("Weak password provided")
 	errInvalidUser       = errors.New("Invalid User")
 	errPasswordDontMatch = errors.New("New passwords do not match")
+	config               = &LdapConfig{}
 )
 
 const (
-	// TODO use encrypted configuration file
 	listenAddress = "0.0.0.0:8081"
-	ldapURI       = "ldap.example.org:389" // starttls over :389
-	bindDN        = "cn=binduser,dc=example,dc=org"
-	bindPW        = "bindpw-p@ssw0rd"
-	baseDN        = "dc=example,dc=org"
-	searchDN      = "(&(objectClass=organizationalPerson)(uid=%s))"
-)
-
-type ldapPasswdUser struct {
-	username      string
-	currentPasswd string
-	newPasswd     string
-	ldapUserDN    string
-	mu            *sync.Mutex
-}
-
-// newLdapPasswdUser set up the ldap request
-func newLdapPasswdUser(u, c, n string) *ldapPasswdUser {
-	return &ldapPasswdUser{
-		username:      u,
-		currentPasswd: c,
-		newPasswd:     n,
-		mu:            &sync.Mutex{},
-	}
-}
-
-// TODO use html template
-func changePasswordHandleFunc(w http.ResponseWriter, req *http.Request) {
-	if strings.ToLower(req.Method) == "post" {
-		req.ParseForm()
-		username := req.Form.Get("username")
-		currentPasswd := req.Form.Get("currentpass")
-		newPasswd1 := req.Form.Get("newpass1")
-		newPasswd := req.Form.Get("newpass2")
-		if currentPasswd == newPasswd1 || currentPasswd == newPasswd {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(errPasswordReuse.Error()))
-			return
-		}
-		if newPasswd1 != newPasswd {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(errPasswordDontMatch.Error()))
-			return
-		}
-		// check password strength
-		passStrength := zxcvbn.PasswordStrength(newPasswd, nil)
-		log.Printf("password provided from: %s for user: %s with a score of: %d\n", req.RemoteAddr, username, passStrength.Score)
-		if passStrength.Score < 3 {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(errWeakPasswordUsed.Error()))
-			return
-		}
-
-		log.Printf("initial change password http request received from: %s for user: %s\n", req.RemoteAddr, username)
-		ldu := newLdapPasswdUser(username, currentPasswd, newPasswd)
-		ok, err := ldu.isValidLDAPUser()
-		if err != nil {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(errInvalidUser.Error()))
-			return
-		}
-
-		if ok {
-			err := ldu.changeLdapPasswd()
-			if err != nil {
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte(err.Error()))
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("Your password has been modified"))
-			log.Printf("successfully changed password for user DN: %s from: %s\n", ldu.ldapUserDN, req.RemoteAddr)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(err.Error()))
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`
+	// TODO use html template
+	passwdChangeHTML = `
 		<html>
 			<head>
 				<title>
@@ -164,24 +90,52 @@ func changePasswordHandleFunc(w http.ResponseWriter, req *http.Request) {
 			
 			</body>
 		</html>	
-		`))
+		`
+)
 
+// LdapConfig is a ldap configuration object
+type LdapConfig struct {
+	LdapURI  string `json:"ldap_uri"`
+	BindDN   string `json:"bind_dn"`
+	BindPW   string `json:"bind_pw"`
+	BaseDN   string `json:"base_dn"`
+	SearchDN string `json:"search_dn"`
+}
+
+// ldapPasswdUser is a internal ldap password user object
+type ldapPasswdUser struct {
+	username      string
+	currentPasswd string
+	newPasswd     string
+	ldapUserDN    string
+	mu            *sync.Mutex
+	remoteIP      string
+}
+
+// newLdapPasswdUser set up the ldap request
+func newLdapPasswdUser(u, c, n string) *ldapPasswdUser {
+	return &ldapPasswdUser{
+		username:      u,
+		currentPasswd: c,
+		newPasswd:     n,
+		mu:            &sync.Mutex{},
+	}
 }
 
 func (ldu *ldapPasswdUser) bootstrapLdapClient() (*ldap.Conn, error) {
-	ld, err := ldap.Dial("tcp", ldapURI)
+	ld, err := ldap.Dial("tcp", config.LdapURI)
 	if err != nil {
 		return nil, err
 	}
 
 	// TODO use a proper tls.Config object with appropriate certificates for ldap tls
-	// `InsecureSkipVerify` should not be set to true in production.
+	// `InsecureSkipVerify` should be false in production.
 	err = ld.StartTLS(&tls.Config{InsecureSkipVerify: true})
 	if err != nil {
 		return nil, err
 	}
 
-	err = ld.Bind(bindDN, bindPW)
+	err = ld.Bind(config.BindDN, config.BindPW)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to bind with ldap")
 	}
@@ -195,11 +149,11 @@ func (ldu *ldapPasswdUser) isValidLDAPUser() (bool, error) {
 		return false, err
 	}
 	defer ld.Close()
-	// Search for the given username
+	// Search for the given username in base DN
 	ldapSearchReq := ldap.NewSearchRequest(
-		baseDN,
+		config.BaseDN,
 		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
-		fmt.Sprintf(searchDN, ldu.username),
+		fmt.Sprintf(config.SearchDN, ldu.username),
 		[]string{"dn"},
 		nil,
 	)
@@ -217,9 +171,8 @@ func (ldu *ldapPasswdUser) isValidLDAPUser() (bool, error) {
 	if err != nil {
 		return false, errors.Wrapf(err, "invalid user")
 	}
-
-	// Rebind as the read only user for any further queries
-	err = ld.Bind(bindDN, bindPW)
+	// Rebind as the bind DN for any further queries
+	err = ld.Bind(config.BindDN, config.BindPW)
 	if err != nil {
 		return false, err
 	}
@@ -246,6 +199,112 @@ func (ldu *ldapPasswdUser) changeLdapPasswd() error {
 		return err
 	}
 	return nil
+}
+
+func changePassword(w http.ResponseWriter, req *http.Request, ldu *ldapPasswdUser) {
+	_, err := ldu.isValidLDAPUser()
+	if err != nil {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(errInvalidUser.Error()))
+		return
+	}
+	remoteIP := getRemoteIP(req)
+	err = ldu.changeLdapPasswd()
+	if err != nil {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(err.Error()))
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Your password has been modified"))
+	log.Printf("successfully changed password for user DN: %s from: %s\n", ldu.ldapUserDN, remoteIP)
+	return
+}
+
+func getRemoteIP(req *http.Request) string {
+	xff := req.Header.Get("X-Forwarded-For")
+	if len(xff) > 0 {
+		return xff
+	}
+	return req.RemoteAddr
+}
+
+func checkPasswdLen(currentPasswd, newPasswd1, newPasswd string, w http.ResponseWriter) bool {
+	if currentPasswd == newPasswd1 || currentPasswd == newPasswd {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(errPasswordReuse.Error()))
+		return false
+	}
+	if newPasswd1 != newPasswd {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(errPasswordDontMatch.Error()))
+		return false
+	}
+	return true
+}
+
+func checkStrength(newPasswd string, w http.ResponseWriter) (bool, int) {
+	passStrength := zxcvbn.PasswordStrength(newPasswd, nil)
+	if passStrength.Score < 3 {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(errWeakPasswordUsed.Error()))
+		return false, -1
+	}
+	return true, passStrength.Score
+}
+
+func changePasswordHandleFunc(w http.ResponseWriter, req *http.Request) {
+	if strings.ToLower(req.Method) == "post" {
+		req.ParseForm()
+		remoteIP := getRemoteIP(req)
+		username := req.Form.Get("username")
+		currentPasswd := req.Form.Get("currentpass")
+		newPasswd1 := req.Form.Get("newpass1")
+		newPasswd := req.Form.Get("newpass2")
+
+		// password length check
+		if !checkPasswdLen(currentPasswd, newPasswd1, newPasswd, w) {
+			return
+		}
+
+		// check password strength score
+		ok, score := checkStrength(newPasswd, w)
+		if !ok {
+			return
+		}
+
+		log.Printf("password provided for change from: %s for user: %s with a score of: %d\n", remoteIP, username, score)
+		ldu := newLdapPasswdUser(username, currentPasswd, newPasswd)
+		changePassword(w, req, ldu)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(passwdChangeHTML))
+}
+
+func init() {
+	// Load configuration file
+	configFile, err := os.Open("conf.json")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer configFile.Close()
+	// init the gloabl config object
+	config, err = loadConfig(configFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func loadConfig(cfReader io.Reader) (*LdapConfig, error) {
+	buf, err := ioutil.ReadAll(cfReader)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(buf, &config); err != nil {
+		return nil, err
+	}
+	return config, nil
 }
 
 func main() {
